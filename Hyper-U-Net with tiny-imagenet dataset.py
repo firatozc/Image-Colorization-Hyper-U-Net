@@ -310,6 +310,53 @@ def save_sample_results(model, val_loader, device, epoch):
                 plt.savefig(f'sample_epoch_{epoch}_img_{j}.png', dpi=150, bbox_inches='tight')
                 plt.close()
 
+def test_model(model_path, test_image_path=None):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    model = HyperUNet(input_channels=1, output_channels=2).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    
+    if test_image_path and os.path.exists(test_image_path):
+        rgb_image = Image.open(test_image_path).convert('RGB')
+        rgb_image = rgb_image.resize((64, 64))
+        
+        # LAB'a çevir
+        rgb_np = np.array(rgb_image)
+        lab_image = cv2.cvtColor(rgb_np, cv2.COLOR_RGB2LAB)
+        lab_image = lab_image.astype(np.float32) / 255.0
+        
+        L = lab_image[:, :, 0:1]
+        L_tensor = torch.from_numpy(L).permute(2, 0, 1).unsqueeze(0).to(device)
+        
+        with torch.no_grad():
+            ab_pred = model(L_tensor)
+        
+        pred_rgb = lab_to_rgb(L_tensor.squeeze(0), ab_pred.squeeze(0))
+        
+        plt.figure(figsize=(12, 4))
+        
+        plt.subplot(1, 3, 1)
+        plt.imshow(L.squeeze(), cmap='gray')
+        plt.title('Grayscale Input')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 2)
+        plt.imshow(rgb_np)
+        plt.title('Original Color')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 3)
+        plt.imshow(pred_rgb)
+        plt.title('Predicted Color')
+        plt.axis('off')
+        
+        plt.tight_layout()
+        plt.savefig('test_result.png', dpi=150, bbox_inches='tight')
+        plt.show()
+
+
 if __name__ == '__main__':
     model = train_model()
+    test_model('hyperunet_colorization.pth', 'tiny-imagenet/tiny-imagenet-200/test/images/test_38.JPEG')
     
