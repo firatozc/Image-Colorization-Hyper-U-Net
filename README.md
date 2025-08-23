@@ -7,3 +7,9 @@ __The articles I read and analyzed__
 * [3. ](https://cs231n.stanford.edu/reports/2017/pdfs/930.pdf)  Tiny ImageNet Challenge
 * [4. ](https://arxiv.org/abs/1603.08511)  Colorful Image Colorization
 * [5. ](https://ieeexplore.ieee.org/document/5206848)  ImageNet: A large-scale hierarchical image database
+
+__Datasets__
+
+* Tiny ImageNet: https://www.kaggle.com/datasets/akash2sharma/tiny-imagenet
+* STL-10: https://www.kaggle.com/datasets/jessicali9530/stl10
+* Intel Image: https://www.kaggle.com/datasets/puneet6060/intel-image-classification
