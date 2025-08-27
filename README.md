@@ -13,3 +13,4 @@ __Datasets__
 * Tiny ImageNet: https://www.kaggle.com/datasets/akash2sharma/tiny-imagenet
 * STL-10: https://www.kaggle.com/datasets/jessicali9530/stl10
 * Intel Image: https://www.kaggle.com/datasets/puneet6060/intel-image-classification
+* Landscape color and grayscale images: https://www.kaggle.com/datasets/theblackmamba31/landscape-image-colorization/data
