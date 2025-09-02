@@ -1,47 +1,31 @@
+import math
+import numpy as np
+from PIL import Image
 import streamlit as st
 import cv2
-import glob
-import numpy as np
-from numpy import zeros, ones, vstack, hstack
-from numpy.random import permutation
-import os
-from PIL import Image
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
 import torchvision.models as models
-import torchvision.transforms as transforms
-from sklearn.utils import shuffle
-from skimage.metrics import structural_similarity as ssim
-import matplotlib.pyplot as plt
-import math
 
 
-# convert RGB to the personal LAB (LAB2)
-# the input R,G,B,  must be 1D from 0 to 255
-# the outputs are 1D  L [0 1], a [-1 1] b [-1 1]
-def RGB2LAB2(R0, G0, B0):
-    R = R0 / 255
-    G = G0 / 255
-    B = B0 / 255
+def rgb2lab2(r0, g0, b0):
+    r = r0 / 255
+    g = g0 / 255
+    b = b0 / 255
 
-    Y = 0.299 * R + 0.587 * G + 0.114 * B
-    X = 0.449 * R + 0.353 * G + 0.198 * B
-    Z = 0.012 * R + 0.089 * G + 0.899 * B
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    x = 0.449 * r + 0.353 * g + 0.198 * b
+    z = 0.012 * r + 0.089 * g + 0.899 * b
 
-    L = Y
-    a = (X - Y) / 0.234
-    b = (Y - Z) / 0.785
+    l = y
+    a = (x - y) / 0.234
+    b = (y - z) / 0.785
 
-    return L, a, b
+    return l, a, b
 
 
-## convert the personal LAB (LAB2) to RGB
-# the input L,a,b,  must be 1D L [0 1], a [-1 1] b [-1 1]
-# the outputs are 1D  R G B [0 255]
-def LAB22RGB(L, a, b):
+def lab22rgb(l, a, b):
     a11 = 0.299
     a12 = 0.587
     a13 = 0.114
@@ -53,23 +37,23 @@ def LAB22RGB(L, a, b):
     a33 = (-0.785 / 0.785)
 
     aa = np.array([[a11, a12, a13], [a21, a22, a23], [a31, a32, a33]])
-    C0 = np.zeros((L.shape[0], 3))
-    C0[:, 0] = L[:, 0]
-    C0[:, 1] = a[:, 0]
-    C0[:, 2] = b[:, 0]
-    C = np.transpose(C0)
+    c0 = np.zeros((l.shape[0], 3))
+    c0[:, 0] = l[:, 0]
+    c0[:, 1] = a[:, 0]
+    c0[:, 2] = b[:, 0]
+    c = np.transpose(c0)
 
-    X = np.linalg.inv(aa).dot(C)
-    X1D = np.reshape(X, (X.shape[0] * X.shape[1], 1))
-    p0 = np.where(X1D < 0)
-    X1D[p0[0]] = 0
-    p1 = np.where(X1D > 1)
-    X1D[p1[0]] = 1
-    Xr = np.reshape(X1D, (X.shape[0], X.shape[1]))
+    x = np.linalg.inv(aa).dot(c)
+    x1_d = np.reshape(x, (x.shape[0] * x.shape[1], 1))
+    p0 = np.where(x1_d < 0)
+    x1_d[p0[0]] = 0
+    p1 = np.where(x1_d > 1)
+    x1_d[p1[0]] = 1
+    xr = np.reshape(x1_d, (x.shape[0], x.shape[1]))
 
-    Rr = Xr[0][:]
-    Gr = Xr[1][:]
-    Br = Xr[2][:]
+    Rr = xr[0][:]
+    Gr = xr[1][:]
+    Br = xr[2][:]
 
     R = np.uint8(np.round(Rr * 255))
     G = np.uint8(np.round(Gr * 255))
@@ -192,7 +176,7 @@ class UNet1(nn.Module):
         self.relu13 = nn.ReLU(inplace=True)
 
         self.conv14 = nn.Conv2d(64, out_channels, kernel_size=3, padding=1)
-        self.tanh = nn.Tanh()
+        self.tanh = nn.Tanh()  # I've changed last activation to tanh because ab channels should be between -1 and 1. And tanh is used for that.
 
     def forward(self, x):
         # Encoder
@@ -246,13 +230,12 @@ class UNet1(nn.Module):
         conv9 = self.conv9(merge9)
 
         # Multi-scale feature fusion
-        up_f01 = conv1  # Original resolution
-        up_f11 = conv9  # Decoded features
-        up_f02 = self.up_f02(conv2)  # Upsampled encoder features
-        up_f12 = self.up_f12(conv8)  # Upsampled decoder features
+        up_f01 = conv1
+        up_f11 = conv9
+        up_f02 = self.up_f02(conv2)
+        up_f12 = self.up_f12(conv8)
 
-        # Concatenate multi-scale features
-        merge11 = torch.cat([up_f01, up_f11, up_f02, up_f12], dim=1)
+        merge11 = torch.cat([up_f01, up_f11, up_f02, up_f12], dim=1)  # Concatenate multi-scale features
 
         # Final processing
         conv11 = self.relu11(self.conv11(merge11))
@@ -268,28 +251,21 @@ def load_vgg16_weights(model):
     vgg16 = models.vgg16(pretrained=True).to(device)
     vgg_features = vgg16.features
 
-    # Adapt first layer from RGB to grayscale
     with torch.no_grad():
-        # Get original RGB weights
-        rgb_weights = vgg_features[0].weight  # Shape: (64, 3, 3, 3)
-        # Average across RGB channels
-        gray_weights = rgb_weights.mean(dim=1, keepdim=True)  # Shape: (64, 1, 3, 3)
+        rgb_weights = vgg_features[0].weight
+        gray_weights = rgb_weights.mean(dim=1, keepdim=True)
 
-        # Set weights for first layer
         model.conv1.double_conv[0].weight.data = gray_weights
         model.conv1.double_conv[0].bias.data = vgg_features[0].bias.data
 
-        # Set weights for second conv in first block
         model.conv1.double_conv[2].weight.data = vgg_features[2].weight.data
         model.conv1.double_conv[2].bias.data = vgg_features[2].bias.data
 
-        # Second block
         model.conv2.double_conv[0].weight.data = vgg_features[5].weight.data
         model.conv2.double_conv[0].bias.data = vgg_features[5].bias.data
         model.conv2.double_conv[2].weight.data = vgg_features[7].weight.data
         model.conv2.double_conv[2].bias.data = vgg_features[7].bias.data
 
-        # Third block (first two convs)
         model.conv3.triple_conv[0].weight.data = vgg_features[10].weight.data
         model.conv3.triple_conv[0].bias.data = vgg_features[10].bias.data
         model.conv3.triple_conv[2].weight.data = vgg_features[12].weight.data
@@ -297,7 +273,6 @@ def load_vgg16_weights(model):
         model.conv3.triple_conv[4].weight.data = vgg_features[14].weight.data
         model.conv3.triple_conv[4].bias.data = vgg_features[14].bias.data
 
-        # Fourth block
         model.conv4.triple_conv[0].weight.data = vgg_features[17].weight.data
         model.conv4.triple_conv[0].bias.data = vgg_features[17].bias.data
         model.conv4.triple_conv[2].weight.data = vgg_features[19].weight.data
@@ -305,7 +280,6 @@ def load_vgg16_weights(model):
         model.conv4.triple_conv[4].weight.data = vgg_features[21].weight.data
         model.conv4.triple_conv[4].bias.data = vgg_features[21].bias.data
 
-        # Fifth block
         model.conv5.triple_conv[0].weight.data = vgg_features[24].weight.data
         model.conv5.triple_conv[0].bias.data = vgg_features[24].bias.data
         model.conv5.triple_conv[2].weight.data = vgg_features[26].weight.data
@@ -333,58 +307,89 @@ def inference(model, l_channel):
         return ab_pred.cpu().numpy()
 
 
-# Testing Images
 def prepare_test_image(img, dim=150):
-    # Eğer img bir PIL.Image ise NumPy array'e çevir
     if isinstance(img, Image.Image):
-        img = np.array(img)  # PIL -> numpy
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # RGB -> BGR (cv2 uyumu için)
+        img = np.array(img)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
     img = cv2.resize(img, (dim, dim))
 
     sz0, sz1 = img.shape[:2]
-    R1 = img[:, :, 2].reshape(-1, 1)  # OpenCV BGR olduğu için
+    R1 = img[:, :, 2].reshape(-1, 1)
     G1 = img[:, :, 1].reshape(-1, 1)
     B1 = img[:, :, 0].reshape(-1, 1)
 
-    # LAB2'ye çevir
-    L, A, B = RGB2LAB2(R1, G1, B1)
+    L, A, B = rgb2lab2(R1, G1, B1)  # LAB2'ye çevir
     L = L.reshape(sz0, sz1, 1)
 
-    # Tensor formatına çevir
-    L_tensor = torch.FloatTensor(L).permute(2, 0, 1)  # (1, H, W)
+    L_tensor = torch.FloatTensor(L).permute(2, 0, 1)
 
     return L_tensor, A.reshape(sz0, sz1), B.reshape(sz0, sz1)
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_path = "Hyper_U_NET_pytorch-latest_model.pth"
+
+model_path = "Hyper_U_NET_pytorch-MAE-30Epoch.pth"
+
 test_model = load_model_for_inference(model_path, device)
 
-st.title("Image Colorization Demo")
-uploaded_file = st.file_uploader("Grayscale görüntü yükle", type=["jpg", "jpeg", "png"])
+st.markdown("<h1 style='text-align: center; color: #4CAF50;'>Image Colorization Demo</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align: center; color: gray;'>Grayscale bir görüntü yükleyin, model sizin için renklendirsin.</p>",
+    unsafe_allow_html=True)
+
+st.markdown(
+    """
+    <style>
+    .css-18e3th9 {padding-top: 2rem;}
+    div.stButton > button:first-child {
+
+        color: white;
+        border-radius: 10px;
+        height: 3em;
+        width: 100%;
+        font-size: 16px;
+        border: none;
+        transition: 0.3s;
+    }
+    div.stButton > button:hover {
+        background-color: #45a049;
+        color: white;
+    }
+    div.stButton > button:active {
+        background-color: #3e8e41 !important;
+        color: white !important;
+    }
+    div.stButton > button:focus {
+        box-shadow: none !important;
+        outline: none !important;
+        color: white !important;
+    }
+    
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+with st.container():
+    st.markdown("#### 📂 Grayscale Görüntü Yükle")
+    uploaded_file = st.file_uploader("Yüklemek için sürükleyip bırakın", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Görseli oku
     img = Image.open(uploaded_file).convert("RGB")
-    st.text("Yüklenen Görsel")
-    st.image(img, caption="Orijinal (Input)", use_column_width=True)
 
-    # Test resmi hazırla
     l_tensor, A_true, B_true = prepare_test_image(img, dim=150)
 
-    # Modelden tahmin
     ab_pred = inference(test_model, l_tensor)
-    ab_pred = ab_pred.squeeze(0)  # (2,H,W)
+    ab_pred = ab_pred.squeeze(0)
     A_pred, B_pred = ab_pred[0], ab_pred[1]
 
-    # LAB2 → RGB geri çevir
     sz0, sz1 = A_pred.shape
     L = l_tensor.squeeze().numpy().reshape(-1, 1)
     A = A_pred.reshape(-1, 1)
     B = B_pred.reshape(-1, 1)
 
-    R, G, B = LAB22RGB(L, A, B)
+    R, G, B = lab22rgb(L, A, B)
     R = R.reshape(sz0, sz1)
     G = G.reshape(sz0, sz1)
     B = B.reshape(sz0, sz1)
@@ -392,6 +397,18 @@ if uploaded_file is not None:
     rgb_pred = cv2.merge([B, G, R])
 
     new_image = cv2.cvtColor(rgb_pred, cv2.COLOR_BGR2RGB)
-    rgb_pred_resized = cv2.resize(new_image, (img.width, img.height))
-    st.text("Renklendirilen Görsel")
-    st.image(np.array(rgb_pred_resized), caption="Renklendirilmiş (Output)", use_column_width=True)
+
+    new_image2 = cv2.resize(new_image, (img.width, img.height), interpolation=cv2.INTER_LANCZOS4)
+
+    if st.button("🎨 Renklendir"):
+        with st.spinner("Model çalışıyor, lütfen bekleyin..."):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Girdi (Grayscale)**")
+                st.image(img)
+
+            with col2:
+                st.markdown("**Model Çıkışı (Renkli)**")
+                st.image(np.array(new_image2))
+
+            st.success("Tamamlandı!")
